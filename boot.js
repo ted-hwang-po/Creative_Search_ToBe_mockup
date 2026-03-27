@@ -5,14 +5,25 @@ async function boot() {
   if (!rootEl) throw new Error("#root not found");
 
   // Load multiple JSX sources (no build step) and run them via Babel.
-  // Keep pages isolated as separate files under ./src/pages/* so they can evolve independently.
   // NOTE: Load order matters (shared first, then pages, then entry App).
   const FILES = [
     "./src/registry.jsx",
     "./src/shared/ui.jsx",
+    "./src/shared/helpers.jsx",
+    "./src/shared/url-state.jsx",
+    "./src/shared/high-efficiency.jsx",
     "./src/shared/patterns.jsx",
+    "./src/shared/chat-panel.jsx",
     "./src/mock/creative-search-dataset-v2.jsx",
-    "./src/pages/creative-search.jsx",
+    // creative-search sub-components (must load before index)
+    "./src/pages/creative-search/creative-card.jsx",
+    "./src/pages/creative-search/insights-summary.jsx",
+    "./src/pages/creative-search/brand-breakdown.jsx",
+    "./src/pages/creative-search/promo-panel.jsx",
+    "./src/pages/creative-search/partnership-panel.jsx",
+    "./src/pages/creative-search/ab-section.jsx",
+    "./src/pages/creative-search/result-list.jsx",
+    "./src/pages/creative-search/index.jsx",
     "./src/pages/creative-search-key-message.jsx",
     "./src/pages/creative-search-influencer.jsx",
     "./src/pages/creative-search-emphasis-trend.jsx",
@@ -40,7 +51,7 @@ async function boot() {
   );
 
   const wrapped = [
-    "const { useMemo, useState, useEffect, useRef } = React;",
+    "const { useMemo, useState, useEffect, useRef, useCallback } = React;",
     withoutExportDefault,
     "",
     "const __root = ReactDOM.createRoot(document.getElementById('root'));",
@@ -68,4 +79,3 @@ boot().catch((err) => {
     `;
   }
 });
-

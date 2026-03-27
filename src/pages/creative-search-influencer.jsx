@@ -13,13 +13,17 @@
     BackToTopButton,
     MiniBarRow,
     StackedBar,
+    ChatPanel,
+    badgeHighEfficiency,
   } = window.__APP.ui;
+  const { clamp, hashStringToInt, seededRand01, pickWeighted, distribution } = window.__APP.helpers;
 
   // ---------- Constants ----------
   const QUERY_LABEL = "인플루언서 소재";
 
-  // Keep brand style consistent with other pages (thumbUrl uses existing assets when possible).
-  const BRANDS = [
+  // Brands from shared dataset with fallback
+  const _ds = window.__APP.dataset && window.__APP.dataset.creativeSearchV2;
+  const BRANDS = _ds ? _ds.brands : [
     { id: "oliveyoung", name: "올리브영", isOwn: true, thumbUrl: "./assets/thumbs/oliveyoung.svg" },
     { id: "innisfree", name: "이니스프리", thumbUrl: "./assets/thumbs/innisfree.svg" },
     { id: "roundlab", name: "라운드랩", thumbUrl: "./assets/thumbs/roundlab.svg" },
@@ -83,35 +87,7 @@
     },
   ];
 
-  // ---------- Helpers ----------
-  function clamp(n, a, b) {
-    return Math.max(a, Math.min(b, n));
-  }
-
-  function hashStringToInt(s) {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-    return Math.abs(h);
-  }
-
-  function seededRand01(seedStr) {
-    let x = hashStringToInt(seedStr) || 1;
-    x ^= x << 13;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    return ((x >>> 0) % 1000000) / 1000000;
-  }
-
-  function pickWeighted(items, weights, r01) {
-    const total = weights.reduce((s, w) => s + w, 0) || 1;
-    let t = r01 * total;
-    for (let i = 0; i < items.length; i++) {
-      t -= weights[i];
-      if (t <= 0) return items[i];
-    }
-    return items[items.length - 1];
-  }
-
+  // ---------- Helpers (page-specific; shared ones imported above) ----------
   function formatNumber(n) {
     if (n == null || Number.isNaN(n)) return "-";
     return Math.round(n).toLocaleString();
@@ -137,10 +113,6 @@
     if (n < TIER.mid.min) return TIER.micro.key;
     if (n < TIER.mega.min) return TIER.mid.key;
     return TIER.mega.key;
-  }
-
-  function badgeHighEfficiency(item) {
-    return (item?.runDays || 0) >= 7;
   }
 
   function overlapsLastNDays({ startDate, endDate, days = 30 }) {
@@ -409,18 +381,6 @@
     return out;
   }
 
-  function distribution(items, keyFn) {
-    const total = items.length || 1;
-    const counts = items.reduce((acc, x) => {
-      const k = keyFn(x) || "-";
-      acc[k] = (acc[k] || 0) + 1;
-      return acc;
-    }, {});
-    return Object.entries(counts)
-      .map(([k, v]) => ({ k, v, pct: (v / total) * 100 }))
-      .sort((a, b) => b.v - a.v);
-  }
-
   // ---------- UI Pieces ----------
   function StatCard({ label, value, sub }) {
     return (
@@ -530,114 +490,6 @@
           </div>
         </div>
       </button>
-    );
-  }
-
-  function ChatPanel({ open, onOpenChange }) {
-    const [draft, setDraft] = useState("");
-    const [messages, setMessages] = useState([]);
-    const bottomRef = useRef(null);
-
-    useEffect(() => {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }, [messages.length, open]);
-
-    useEffect(() => {
-      if (!open) return;
-      // When opened first time, show the required prompt.
-      setMessages((prev) => {
-        if (prev.length > 0) return prev;
-        return [{ role: "assistant", text: "적합한 인플루언서를 탐색해보시겠습니까?" }];
-      });
-    }, [open]);
-
-    const send = () => {
-      const text = draft.trim();
-      if (!text) return;
-      setDraft("");
-
-      const normalized = text.replace(/\s+/g, "");
-      const assistantText =
-        normalized === "네" ? "정식 제품에서는 인플루언서 시딩도 도와드릴게요." : "원하시면 “네”라고 입력해 주세요.";
-
-      setMessages((prev) => [...prev, { role: "user", text }, { role: "assistant", text: assistantText }]);
-    };
-
-    return (
-      <>
-        {/* Docked side panel (desktop) */}
-        <div
-          className={`fixed bottom-6 right-6 z-40 hidden w-[360px] flex-col overflow-hidden rounded-2xl border bg-white shadow-lg md:flex ${
-            open ? "" : "pointer-events-none opacity-0"
-          }`}
-          style={{ height: "calc(100vh - 9rem)" }}
-        >
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <div className="text-sm font-semibold text-zinc-900">AI Chat</div>
-            <button
-              type="button"
-              onClick={() => onOpenChange?.(false)}
-              className="rounded-lg border bg-white px-2 py-1 text-xs text-zinc-900 hover:bg-zinc-50"
-            >
-              닫기
-            </button>
-          </div>
-
-          <div className="flex-1 space-y-2 overflow-y-auto bg-zinc-50 p-3">
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`max-w-[90%] rounded-2xl border px-3 py-2 text-sm ${
-                  m.role === "user" ? "ml-auto bg-white text-zinc-900" : "mr-auto border-emerald-200 bg-emerald-50 text-emerald-900"
-                }`}
-              >
-                {m.text}
-              </div>
-            ))}
-            <div ref={bottomRef} />
-          </div>
-
-          <div className="border-t bg-white p-2">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              rows={2}
-              placeholder="“네”라고 입력해 추천 탐색을 진행해보세요."
-              className="w-full resize-none rounded-xl border bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
-            />
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-[11px] text-zinc-500">Enter: 전송 · Shift+Enter: 줄바꿈</div>
-              <button
-                type="button"
-                onClick={send}
-                className="rounded-xl border bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
-              >
-                보내기
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Re-open button (desktop) */}
-        {!open && (
-          <button
-            type="button"
-            onClick={() => onOpenChange?.(true)}
-            className="fixed bottom-20 right-6 z-40 hidden items-center gap-2 rounded-full border bg-white/90 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-lg backdrop-blur hover:bg-white md:inline-flex"
-            aria-label="AI Chat 열기"
-            title="AI Chat"
-          >
-            <span className="text-base leading-none">💬</span>
-            <span>AI Chat</span>
-          </button>
-        )}
-      </>
     );
   }
 
@@ -1300,7 +1152,25 @@
           )}
         </Drawer>
 
-        <ChatPanel open={chatOpen} onOpenChange={setChatOpen} />
+        <ChatPanel
+          open={chatOpen}
+          onOpenChange={setChatOpen}
+          config={{
+            title: "소재 도우미",
+            disclaimer: "프로토타입에서는 사전 설정된 응답을 제공합니다.",
+            initialMessages: [
+              { role: "assistant", text: "적합한 인플루언서를 탐색해보시겠습니까?" },
+            ],
+            onSend: function (text, { pushAssistant }) {
+              var normalized = text.replace(/\s+/g, "");
+              if (normalized === "네") {
+                pushAssistant("정식 제품에서는 인플루언서 시딩도 도와드릴게요.");
+              } else {
+                pushAssistant("원하시면 \"네\"라고 입력해 주세요.");
+              }
+            },
+          }}
+        />
         <BackToTopButton />
       </PageShell>
     );

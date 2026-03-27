@@ -13,7 +13,8 @@
 // - Chat UI same as creative-search.jsx, with meme recommendation flow
 
 (function registerCreativeSearchMonthlyTrendPage() {
-  const { Pill, Drawer, SectionHeader, Tabs, PageShell, KpiStrip, AccordionSection, BackToTopButton, MiniBarRow } = window.__APP.ui;
+  const { Pill, Drawer, SectionHeader, Tabs, PageShell, KpiStrip, AccordionSection, BackToTopButton, MiniBarRow, ChatPanel, badgeHighEfficiency } = window.__APP.ui;
+  const { clamp, hashStringToInt, seededRand01, pick: pickOne, pickWeighted, distribution } = window.__APP.helpers;
 
   // ---------- Constants ----------
   const QUERY_LABEL = "이번 달 많이 사용된 소재 뭐야?";
@@ -29,7 +30,9 @@
     end: new Date(MONTH.year, MONTH.monthIndex, 4),
   };
 
-  const BRANDS = [
+  // Brands from shared dataset with fallback
+  const _ds = window.__APP.dataset && window.__APP.dataset.creativeSearchV2;
+  const BRANDS = _ds ? _ds.brands : [
     { id: "oliveyoung", name: "올리브영", isOwn: true, thumbUrl: "./assets/thumbs/oliveyoung.svg" },
     { id: "innisfree", name: "이니스프리", thumbUrl: "./assets/thumbs/innisfree.svg" },
     { id: "roundlab", name: "라운드랩", thumbUrl: "./assets/thumbs/roundlab.svg" },
@@ -84,11 +87,7 @@
     },
   ];
 
-  // ---------- Helpers ----------
-  function clamp(n, a, b) {
-    return Math.max(a, Math.min(b, n));
-  }
-
+  // ---------- Helpers (page-specific; shared ones imported above) ----------
   function pad2(n) {
     return String(n).padStart(2, "0");
   }
@@ -145,34 +144,6 @@
     return { start: s, end: e };
   }
 
-  function hashStringToInt(s) {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-    return Math.abs(h);
-  }
-
-  function seededRand01(seedStr) {
-    let x = hashStringToInt(seedStr) || 1;
-    x ^= x << 13;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    return ((x >>> 0) % 1000000) / 1000000;
-  }
-
-  function pickOne(arr, r01) {
-    return arr[Math.floor(clamp(r01, 0, 0.999999) * arr.length)];
-  }
-
-  function pickWeighted(items, weights, r01) {
-    const total = weights.reduce((s, w) => s + w, 0) || 1;
-    let t = r01 * total;
-    for (let i = 0; i < items.length; i++) {
-      t -= weights[i];
-      if (t <= 0) return items[i];
-    }
-    return items[items.length - 1];
-  }
-
   function groupBy(arr, keyFn) {
     return arr.reduce((acc, x) => {
       const k = keyFn(x);
@@ -184,22 +155,6 @@
 
   function getBrand(brandId) {
     return BRANDS.find((b) => b.id === brandId);
-  }
-
-  function badgeHighEfficiency(creative) {
-    return creative.runDays >= 7;
-  }
-
-  function distribution(items, keyFn) {
-    const total = items.length || 1;
-    const counts = items.reduce((acc, x) => {
-      const k = keyFn(x) || "-";
-      acc[k] = (acc[k] || 0) + 1;
-      return acc;
-    }, {});
-    return Object.entries(counts)
-      .map(([k, v]) => ({ k, v, pct: (v / total) * 100 }))
-      .sort((a, b) => b.v - a.v);
   }
 
   function buildThumbDataUrl({ seedStr, brandName, mediaType, keyMessageType, token }) {
@@ -724,191 +679,6 @@
     );
   }
 
-  function ChatPanel({ open, onOpenChange, onMemeYes }) {
-    const [draft, setDraft] = useState("");
-    const [messages, setMessages] = useState([]);
-    const [memeShown, setMemeShown] = useState(false);
-    const bottomRef = useRef(null);
-
-    useEffect(() => {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }, [messages.length, open]);
-
-    // Inject initial assistant prompt on first open
-    useEffect(() => {
-      if (!open) return;
-      setMessages((prev) => {
-        if (prev.length > 0) return prev;
-        return [
-          {
-            role: "assistant",
-            type: "text",
-            text: "새로운 소재 기획이 필요하신가요? 최근 트렌드인 '밈 사용' 을 추천합니다.\n최근 트렌드를 추천해드릴까요?",
-          },
-        ];
-      });
-    }, [open]);
-
-    const replyFallback =
-      "프로토타입에서는 밈 추천 흐름만 제공됩니다. ‘네’ 라고 입력하시면 최근 트렌드 밈을 요약해드릴게요.";
-
-    const pushAssistantText = (text) => setMessages((prev) => [...prev, { role: "assistant", type: "text", text }]);
-
-    const send = () => {
-      const text = draft.trim();
-      if (!text) return;
-      setDraft("");
-      setMessages((prev) => [...prev, { role: "user", type: "text", text }]);
-
-      const normalized = text.replace(/\s+/g, "").toLowerCase();
-      if (normalized === "네" || normalized === "yes" || normalized === "y") {
-        setMemeShown(true);
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", type: "meme_list", memes: MEME_LIBRARY.slice(0, 3) },
-          { role: "assistant", type: "meme_cta" },
-        ]);
-        return;
-      }
-
-      pushAssistantText(replyFallback);
-    };
-
-    return (
-      <>
-        {/* Docked side panel (desktop) */}
-        <div
-          className={`fixed bottom-6 right-6 z-40 hidden w-[360px] flex-col overflow-hidden rounded-2xl border bg-white shadow-lg md:flex ${
-            open ? "" : "pointer-events-none opacity-0"
-          }`}
-          style={{ height: "calc(100vh - 9rem)" }}
-        >
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <div className="text-sm font-semibold text-zinc-900">AI Chat</div>
-            <button
-              type="button"
-              onClick={() => onOpenChange?.(false)}
-              className="rounded-lg border bg-white px-2 py-1 text-xs text-zinc-900 hover:bg-zinc-50"
-            >
-              닫기
-            </button>
-          </div>
-
-          <div className="flex-1 space-y-2 overflow-y-auto bg-zinc-50 p-3">
-            {messages.length === 0 && (
-              <div className="rounded-xl border bg-white p-3 text-sm text-zinc-600">
-                새로운 소재 기획이 필요하신가요? 최근 트렌드를 추천해드릴까요?
-              </div>
-            )}
-
-            {messages.map((m, i) => {
-              if (m.type === "meme_list") {
-                return (
-                  <div key={i} className="mr-auto max-w-[95%] rounded-2xl border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                    <div className="font-semibold">최근 한국 인스타그램/틱톡 밈 요약</div>
-                    <div className="mt-2 space-y-2">
-                      {m.memes.map((mm) => (
-                        <div key={mm.id} className="rounded-xl border bg-white p-2 text-sm text-zinc-900">
-                          <div className="font-semibold">{mm.title}</div>
-                          <div className="mt-1 text-xs text-zinc-700">{mm.summary}</div>
-                          <div className="mt-1 text-xs text-zinc-500">활용 팁: {mm.usageHint}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              }
-
-              if (m.type === "meme_cta") {
-                return (
-                  <div key={i} className="mr-auto max-w-[95%] rounded-2xl border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                    <div>해당 밈을 사용한 소재를 만들어보시겠습니까?</div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMessages((prev) => [...prev, { role: "user", type: "text", text: "Yes" }]);
-                          pushAssistantText("좋아요. 최신 주차의 ‘밈 사용’ 클러스터로 이동해드릴게요.");
-                          onMemeYes?.();
-                        }}
-                        className="rounded-xl border bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
-                      >
-                        Yes
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMessages((prev) => [...prev, { role: "user", type: "text", text: "No" }]);
-                          pushAssistantText("알겠습니다. 필요하실 때 언제든 밈 추천을 요청해 주세요.");
-                        }}
-                        className="rounded-xl border bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900 hover:bg-zinc-50"
-                      >
-                        No
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
-
-              const isUser = m.role === "user";
-              return (
-                <div
-                  key={i}
-                  className={`max-w-[90%] whitespace-pre-wrap rounded-2xl border px-3 py-2 text-sm ${
-                    isUser ? "ml-auto bg-white text-zinc-900" : "mr-auto border-emerald-200 bg-emerald-50 text-emerald-900"
-                  }`}
-                >
-                  {m.text}
-                </div>
-              );
-            })}
-            <div ref={bottomRef} />
-          </div>
-
-          <div className="border-t bg-white p-2">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              rows={2}
-              placeholder={memeShown ? "추가로 궁금한 점을 입력하세요." : "‘네’ 라고 입력하면 밈을 추천합니다."}
-              className="w-full resize-none rounded-xl border bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
-            />
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-[11px] text-zinc-500">Enter: 전송 · Shift+Enter: 줄바꿈</div>
-              <button
-                type="button"
-                onClick={send}
-                className="rounded-xl border bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
-              >
-                보내기
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Re-open button (desktop) */}
-        {!open && (
-          <button
-            type="button"
-            onClick={() => onOpenChange?.(true)}
-            className="fixed bottom-20 right-6 z-40 hidden items-center gap-2 rounded-full border bg-white/90 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-lg backdrop-blur hover:bg-white md:inline-flex"
-            aria-label="AI Chat 열기"
-            title="AI Chat"
-          >
-            <span className="text-base leading-none">💬</span>
-            <span>AI Chat</span>
-          </button>
-        )}
-      </>
-    );
-  }
-
   // ---------- Page Root ----------
   function CreativeSearchMonthlyTrendPage() {
     const seed = "monthly-trend:v1";
@@ -1355,7 +1125,63 @@
           )}
         </Drawer>
 
-        <ChatPanel open={chatOpen} onOpenChange={setChatOpen} onMemeYes={gotoMemeCluster} />
+        <ChatPanel
+          open={chatOpen}
+          onOpenChange={setChatOpen}
+          config={{
+            title: "소재 도우미",
+            disclaimer: "프로토타입에서는 사전 설정된 응답을 제공합니다.",
+            initialMessages: [
+              { role: "assistant", text: "새로운 소재 기획이 필요하신가요? 최근 트렌드인 '밈 사용' 을 추천합니다.\n최근 트렌드를 추천해드릴까요?" },
+            ],
+            onSend: function (text, { pushAssistant }) {
+              var normalized = text.replace(/\s+/g, "").toLowerCase();
+              if (normalized === "네" || normalized === "yes" || normalized === "y") {
+                pushAssistant("밈 추천을 확인해 보세요.", { type: "meme_list", memes: MEME_LIBRARY.slice(0, 3) });
+                pushAssistant("해당 밈을 사용한 소재를 만들어보시겠습니까?", { type: "meme_cta" });
+              } else {
+                pushAssistant("프로토타입에서는 밈 추천 흐름만 제공됩니다. '네' 라고 입력하시면 최근 트렌드 밈을 요약해드릴게요.");
+              }
+            },
+            renderMessage: function (msg, i) {
+              if (msg.type === "meme_list" && msg.memes) {
+                return (
+                  <div className="mr-auto max-w-[95%] rounded-xl bg-zinc-100 px-3 py-2 text-sm text-zinc-800">
+                    <div className="font-semibold">최근 한국 인스타그램/틱톡 밈 요약</div>
+                    <div className="mt-2 space-y-2">
+                      {msg.memes.map(function (mm) {
+                        return (
+                          <div key={mm.id} className="rounded-xl border bg-white p-2 text-sm text-zinc-900">
+                            <div className="font-semibold">{mm.title}</div>
+                            <div className="mt-1 text-xs text-zinc-700">{mm.summary}</div>
+                            <div className="mt-1 text-xs text-zinc-500">활용 팁: {mm.usageHint}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+              if (msg.type === "meme_cta") {
+                return (
+                  <div className="mr-auto max-w-[95%] rounded-xl bg-zinc-100 px-3 py-2 text-sm text-zinc-800">
+                    <div>{msg.text}</div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={function () { gotoMemeCluster(); }}
+                        className="rounded-xl border bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
+                      >
+                        Yes
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            },
+          }}
+        />
         <BackToTopButton />
       </PageShell>
     );

@@ -2,7 +2,8 @@
 // This module registers itself to window.__APP.pages.creativeSearchEmphasisTrend
 
 (function registerCreativeSearchEmphasisTrendPage() {
-  const { Pill, SectionHeader, Drawer, Tabs, PageShell, KpiStrip, AccordionSection, BackToTopButton, MiniBarRow } = window.__APP.ui;
+  const { Pill, SectionHeader, Drawer, Tabs, PageShell, KpiStrip, AccordionSection, BackToTopButton, MiniBarRow, ChatPanel, badgeHighEfficiency } = window.__APP.ui;
+  const { clamp, hashStringToInt, seededRand01, pickWeighted, distribution } = window.__APP.helpers;
 
   // ---------- Constants ----------
   const QUERY_LABEL = "성분/제형/효과 강조 트렌드 알려줘";
@@ -19,7 +20,9 @@
     device: { key: "device", label: "뷰티 디바이스" },
   };
 
-  const BRANDS = [
+  // Brands from shared dataset with fallback
+  const _ds = window.__APP.dataset && window.__APP.dataset.creativeSearchV2;
+  const BRANDS = _ds ? _ds.brands : [
     { id: "oliveyoung", name: "올리브영", isOwn: true, thumbUrl: "./assets/thumbs/oliveyoung.svg" },
     { id: "innisfree", name: "이니스프리", thumbUrl: "./assets/thumbs/innisfree.svg" },
     { id: "roundlab", name: "라운드랩", thumbUrl: "./assets/thumbs/roundlab.svg" },
@@ -76,57 +79,13 @@
     },
   };
 
-  // ---------- Helpers ----------
-  function clamp(n, a, b) {
-    return Math.max(a, Math.min(b, n));
-  }
-
-  function hashStringToInt(s) {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-    return Math.abs(h);
-  }
-
-  function seededRand01(seedStr) {
-    let x = hashStringToInt(seedStr) || 1;
-    x ^= x << 13;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    return ((x >>> 0) % 1000000) / 1000000;
-  }
-
-  function pickWeighted(items, weights, r01) {
-    const total = weights.reduce((s, w) => s + w, 0) || 1;
-    let t = r01 * total;
-    for (let i = 0; i < items.length; i++) {
-      t -= weights[i];
-      if (t <= 0) return items[i];
-    }
-    return items[items.length - 1];
-  }
-
-  function distribution(items, keyFn) {
-    const total = items.length || 1;
-    const counts = items.reduce((acc, x) => {
-      const k = keyFn(x) || "-";
-      acc[k] = (acc[k] || 0) + 1;
-      return acc;
-    }, {});
-    return Object.entries(counts)
-      .map(([k, v]) => ({ k, v, pct: (v / total) * 100 }))
-      .sort((a, b) => b.v - a.v);
-  }
-
+  // ---------- Helpers (page-specific; shared ones imported above) ----------
   function getBrand(brandId) {
     return BRANDS.find((b) => b.id === brandId);
   }
 
   function labelForLayoutClass(layoutClass) {
     return IMAGE_LAYOUT_LIBRARY[layoutClass]?.name || VIDEO_LAYOUT_LIBRARY[layoutClass]?.name || layoutClass;
-  }
-
-  function badgeHighEfficiency(creative) {
-    return creative.runDays >= 7;
   }
 
   function dimensionToken(creative, dimensionKey) {
@@ -509,161 +468,6 @@
           </div>
         )}
       </div>
-    );
-  }
-
-  function ChatPanel({ open, onOpenChange, dimensionKey, onDimensionChange }) {
-    const [draft, setDraft] = useState("");
-    const [messages, setMessages] = useState([]);
-    const bottomRef = useRef(null);
-
-    useEffect(() => {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }, [messages.length, open]);
-
-    useEffect(() => {
-      if (!open) return;
-      // On open, show the required prompt once (if empty).
-      setMessages((prev) => {
-        if (prev.length > 0) return prev;
-        return [{ role: "assistant", text: "성분 외에도 제형, 효과 강조 트렌드가 궁금하신가요?" }];
-      });
-    }, [open]);
-
-    const helpText = "프로토타입에서는 ‘제형’ 또는 ‘효과’를 입력하면 페이지가 해당 축으로 전환됩니다.";
-
-    const send = () => {
-      const text = draft.trim();
-      if (!text) return;
-      setDraft("");
-
-      const normalized = text.replace(/\s+/g, "");
-      const nextDimension = normalized === "제형" ? "formula" : normalized === "효과" ? "effect" : normalized === "성분" ? "ingredient" : null;
-
-      if (nextDimension) {
-        onDimensionChange?.(nextDimension);
-        setMessages((prev) => [
-          ...prev,
-          { role: "user", text },
-          { role: "assistant", text: `확인했어요. 이제 ‘${DIMENSIONS[nextDimension].label}’ 강조 트렌드로 업데이트했어요.` },
-          { role: "assistant", text: "다른 축이 궁금하면 ‘성분/제형/효과’ 중 하나를 입력해보세요." },
-        ]);
-        return;
-      }
-
-      setMessages((prev) => [...prev, { role: "user", text }, { role: "assistant", text: helpText }]);
-    };
-
-    const quick = (k) => {
-      onDimensionChange?.(k);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", text: `‘${DIMENSIONS[k].label}’ 축으로 전환했어요. 상단 요약/브랜드 카드/리스트가 모두 업데이트됩니다.` },
-      ]);
-    };
-
-    return (
-      <>
-        {/* Docked side panel (desktop) */}
-        <div
-          className={`fixed bottom-6 right-6 z-40 hidden w-[360px] flex-col overflow-hidden rounded-2xl border bg-white shadow-lg md:flex ${
-            open ? "" : "pointer-events-none opacity-0"
-          }`}
-          style={{ height: "calc(100vh - 9rem)" }}
-        >
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <div className="text-sm font-semibold text-zinc-900">AI Chat</div>
-            <button
-              type="button"
-              onClick={() => onOpenChange?.(false)}
-              className="rounded-lg border bg-white px-2 py-1 text-xs text-zinc-900 hover:bg-zinc-50"
-            >
-              닫기
-            </button>
-          </div>
-
-          <div className="border-b bg-white p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Pill tone="blue">현재: {DIMENSIONS[dimensionKey]?.label}</Pill>
-              <button
-                type="button"
-                onClick={() => quick("ingredient")}
-                className="rounded-full border bg-white px-2 py-1 text-xs text-zinc-800 hover:bg-zinc-50"
-              >
-                성분
-              </button>
-              <button
-                type="button"
-                onClick={() => quick("formula")}
-                className="rounded-full border bg-white px-2 py-1 text-xs text-zinc-800 hover:bg-zinc-50"
-              >
-                제형
-              </button>
-              <button
-                type="button"
-                onClick={() => quick("effect")}
-                className="rounded-full border bg-white px-2 py-1 text-xs text-zinc-800 hover:bg-zinc-50"
-              >
-                효과
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 space-y-2 overflow-y-auto bg-zinc-50 p-3">
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`max-w-[90%] rounded-2xl border px-3 py-2 text-sm ${
-                  m.role === "user" ? "ml-auto bg-white text-zinc-900" : "mr-auto border-emerald-200 bg-emerald-50 text-emerald-900"
-                }`}
-              >
-                {m.text}
-              </div>
-            ))}
-            <div ref={bottomRef} />
-          </div>
-
-          <div className="border-t bg-white p-2">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              rows={2}
-              placeholder="예: 제형 / 효과"
-              className="w-full resize-none rounded-xl border bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
-            />
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-[11px] text-zinc-500">Enter: 전송 · Shift+Enter: 줄바꿈</div>
-              <button
-                type="button"
-                onClick={send}
-                className="rounded-xl border bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
-              >
-                보내기
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Re-open button (desktop) */}
-        {!open && (
-          <button
-            type="button"
-            onClick={() => onOpenChange?.(true)}
-            className="fixed bottom-20 right-6 z-40 hidden items-center gap-2 rounded-full border bg-white/90 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-lg backdrop-blur hover:bg-white md:inline-flex"
-            aria-label="AI Chat 열기"
-            title="AI Chat"
-          >
-            <span className="text-base leading-none">💬</span>
-            <span>AI Chat</span>
-          </button>
-        )}
-      </>
     );
   }
 
@@ -1205,8 +1009,33 @@
         <ChatPanel
           open={chatOpen}
           onOpenChange={setChatOpen}
-          dimensionKey={dimensionKey}
-          onDimensionChange={setDimensionKey}
+          config={{
+            title: "소재 도우미",
+            disclaimer: "프로토타입에서는 사전 설정된 응답을 제공합니다.",
+            initialMessages: [
+              { role: "assistant", text: "성분 외에도 제형, 효과 강조 트렌드가 궁금하신가요?" },
+            ],
+            quickActions: [
+              { label: "성분", action: "ingredient" },
+              { label: "제형", action: "formula" },
+              { label: "효과", action: "effect" },
+            ],
+            onQuickAction: function (action, { pushAssistant }) {
+              setDimensionKey(action);
+              pushAssistant("'" + DIMENSIONS[action].label + "' 축으로 전환했어요. 상단 요약/브랜드 카드/리스트가 모두 업데이트됩니다.");
+            },
+            onSend: function (text, { pushAssistant }) {
+              var normalized = text.replace(/\s+/g, "");
+              var nextDimension = normalized === "제형" ? "formula" : normalized === "효과" ? "effect" : normalized === "성분" ? "ingredient" : null;
+              if (nextDimension) {
+                setDimensionKey(nextDimension);
+                pushAssistant("확인했어요. 이제 '" + DIMENSIONS[nextDimension].label + "' 강조 트렌드로 업데이트했어요.");
+                pushAssistant("다른 축이 궁금하면 '성분/제형/효과' 중 하나를 입력해보세요.");
+              } else {
+                pushAssistant("프로토타입에서는 '제형' 또는 '효과'를 입력하면 페이지가 해당 축으로 전환됩니다.");
+              }
+            },
+          }}
         />
         <BackToTopButton />
       </PageShell>

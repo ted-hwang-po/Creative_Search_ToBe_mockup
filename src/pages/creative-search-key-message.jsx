@@ -2,12 +2,13 @@
 // This module registers itself to window.__APP.pages.creativeSearchKeyMessage
 
 (function registerCreativeSearchKeyMessagePage() {
-  const { Pill, SectionHeader, Tabs, PageShell, KpiStrip, AccordionSection, BackToTopButton, MiniBarRow } = window.__APP.ui;
+  const { Pill, SectionHeader, Tabs, PageShell, KpiStrip, AccordionSection, BackToTopButton, MiniBarRow, ChatPanel } = window.__APP.ui;
+  const { clamp, hashStringToInt, seededRand01, pickWeighted, distribution } = window.__APP.helpers;
+  const { badgeHighEfficiency } = window.__APP.ui;
 
-  // ---------- Mock Data (independent) ----------
-  const QUERY_LABEL = "성분이나 제품 구성을 강조한 소재들은 보통 어떻게 생겼어?";
-
-  const BRANDS = [
+  // ---------- Brands (from shared dataset, with fallback) ----------
+  const ds = window.__APP.dataset && window.__APP.dataset.creativeSearchV2;
+  const BRANDS = ds ? ds.brands : [
     { id: "oliveyoung", name: "올리브영", isOwn: true, thumbUrl: "./assets/thumbs/oliveyoung.svg" },
     { id: "innisfree", name: "이니스프리", thumbUrl: "./assets/thumbs/innisfree.svg" },
     { id: "roundlab", name: "라운드랩", thumbUrl: "./assets/thumbs/roundlab.svg" },
@@ -17,6 +18,9 @@
     { id: "drg", name: "닥터지" },
     { id: "mediheal", name: "메디힐" },
   ];
+
+  // ---------- Mock Data (independent) ----------
+  const QUERY_LABEL = "성분이나 제품 구성을 강조한 소재들은 보통 어떻게 생겼어?";
 
   const IMAGE_LAYOUT_LIBRARY = {
     "hero-product-left": { name: "제품 히어로(좌) + 성분/포인트(우)" },
@@ -33,53 +37,9 @@
     demo: { name: "데모/텍스처 클로즈업형" },
   };
 
-  // ---------- Helpers ----------
-  function clamp(n, a, b) {
-    return Math.max(a, Math.min(b, n));
-  }
-
-  function hashStringToInt(s) {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-    return Math.abs(h);
-  }
-
-  function seededRand01(seedStr) {
-    let x = hashStringToInt(seedStr) || 1;
-    x ^= x << 13;
-    x ^= x >>> 17;
-    x ^= x << 5;
-    return ((x >>> 0) % 1000000) / 1000000;
-  }
-
-  function pickWeighted(items, weights, r01) {
-    const total = weights.reduce((s, w) => s + w, 0) || 1;
-    let t = r01 * total;
-    for (let i = 0; i < items.length; i++) {
-      t -= weights[i];
-      if (t <= 0) return items[i];
-    }
-    return items[items.length - 1];
-  }
-
-  function badgeHighEfficiency(creative) {
-    return creative.runDays >= 7;
-  }
-
+  // ---------- Page-specific helpers ----------
   function getBrand(brandId) {
     return BRANDS.find((b) => b.id === brandId);
-  }
-
-  function distribution(items, keyFn) {
-    const total = items.length || 1;
-    const counts = items.reduce((acc, x) => {
-      const k = keyFn(x) || "-";
-      acc[k] = (acc[k] || 0) + 1;
-      return acc;
-    }, {});
-    return Object.entries(counts)
-      .map(([k, v]) => ({ k, v, pct: (v / total) * 100 }))
-      .sort((a, b) => b.v - a.v);
   }
 
   function labelForLayoutClass(layoutClass) {
@@ -362,112 +322,12 @@
     );
   }
 
-  function ChatPanel({ open, onOpenChange }) {
-    const [draft, setDraft] = useState("");
-    const [messages, setMessages] = useState([]);
-    const bottomRef = useRef(null);
-
-    useEffect(() => {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }, [messages.length, open]);
-
-    const replyText =
-      "제품 개발이 완료되면 요약된 정보 외 궁금하신 점을 자유롭게 물어보실 수 있습니다. 프로토타입에서는 지원하지 않습니다.";
-
-    const send = () => {
-      const text = draft.trim();
-      if (!text) return;
-      setDraft("");
-      setMessages((prev) => [...prev, { role: "user", text }, { role: "assistant", text: replyText }]);
-    };
-
-    return (
-      <>
-        {/* Docked side panel (desktop) */}
-        <div
-          className={`fixed bottom-6 right-6 z-40 hidden w-[360px] flex-col overflow-hidden rounded-2xl border bg-white shadow-lg md:flex ${
-            open ? "" : "pointer-events-none opacity-0"
-          }`}
-          style={{ height: "calc(100vh - 9rem)" }}
-        >
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <div className="text-sm font-semibold text-zinc-900">AI Chat</div>
-            <button
-              type="button"
-              onClick={() => onOpenChange?.(false)}
-              className="rounded-lg border bg-white px-2 py-1 text-xs text-zinc-900 hover:bg-zinc-50"
-            >
-              닫기
-            </button>
-          </div>
-
-          <div className="flex-1 space-y-2 overflow-y-auto bg-zinc-50 p-3">
-            {messages.length === 0 && (
-              <div className="rounded-xl border bg-white p-3 text-sm text-zinc-600">검색결과에 대해 더 궁금한 것을 물어보세요.</div>
-            )}
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`max-w-[90%] rounded-2xl border px-3 py-2 text-sm ${
-                  m.role === "user" ? "ml-auto bg-white text-zinc-900" : "mr-auto border-emerald-200 bg-emerald-50 text-emerald-900"
-                }`}
-              >
-                {m.text}
-              </div>
-            ))}
-            <div ref={bottomRef} />
-          </div>
-
-          <div className="border-t bg-white p-2">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              rows={2}
-              placeholder="검색결과에 대해 더 궁금한 것을 물어보세요."
-              className="w-full resize-none rounded-xl border bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
-            />
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-[11px] text-zinc-500">Enter: 전송 · Shift+Enter: 줄바꿈</div>
-              <button
-                type="button"
-                onClick={send}
-                className="rounded-xl border bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
-              >
-                보내기
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Re-open button (desktop) */}
-        {!open && (
-          <button
-            type="button"
-            onClick={() => onOpenChange?.(true)}
-            className="fixed bottom-20 right-6 z-40 hidden items-center gap-2 rounded-full border bg-white/90 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-lg backdrop-blur hover:bg-white md:inline-flex"
-            aria-label="AI Chat 열기"
-            title="AI Chat"
-          >
-            <span className="text-base leading-none">💬</span>
-            <span>AI Chat</span>
-          </button>
-        )}
-      </>
-    );
-  }
-
   function CreativeSearchKeyMessagePage() {
-    const ds = (window.__APP && window.__APP.dataset && window.__APP.dataset.creativeSearchV2) || null;
+    const dsPage = (window.__APP && window.__APP.dataset && window.__APP.dataset.creativeSearchV2) || null;
     const results = useMemo(() => buildMockResults({ total: 240, seed: "km-query:v1" }), []);
-    const ingredientInsights = useMemo(() => ds?.ingredientInsights || [], [ds?.version]);
-    const dsIngredients = useMemo(() => ds?.ingredients || [], [ds?.version]);
-    const dsAssets = useMemo(() => ds?.creativeAssets || [], [ds?.version]);
+    const ingredientInsights = useMemo(() => dsPage?.ingredientInsights || [], [dsPage?.version]);
+    const dsIngredients = useMemo(() => dsPage?.ingredients || [], [dsPage?.version]);
+    const dsAssets = useMemo(() => dsPage?.creativeAssets || [], [dsPage?.version]);
     const assetById = useMemo(() => {
       const m = new Map();
       (dsAssets || []).forEach((a) => m.set(a.id, a));
@@ -535,10 +395,19 @@
       return ingredientInsights.find((x) => x.ingredientId === selectedIngredientId) || null;
     }, [ingredientInsights, selectedIngredientId]);
 
+    // ChatPanel config
+    const chatConfig = useMemo(() => ({
+      title: "소재 도우미",
+      disclaimer: "프로토타입에서는 사전 설정된 응답을 제공합니다.",
+      onSend: function (text, { pushAssistant }) {
+        pushAssistant("제품 개발이 완료되면 요약된 정보 외 궁금하신 점을 자유롭게 물어보실 수 있습니다. 프로토타입에서는 지원하지 않습니다.");
+      },
+    }), []);
+
     return (
       <PageShell
         title="소재 검색 결과 (키 메시지 관심사)"
-        subtitle="‘성분 강조’ vs ‘제품 구성 강조’를 비교해, 어떤 형태의 소재를 만들지 빠르게 결정합니다."
+        subtitle="'성분 강조' vs '제품 구성 강조'를 비교해, 어떤 형태의 소재를 만들지 빠르게 결정합니다."
         right={
           <>
             <Tabs
@@ -609,11 +478,11 @@
             <div className="rounded-2xl border bg-white p-4">
               <SectionHeader
                 title="성분별 소재 특징"
-                subtitle="성분별로 ‘자주 쓰는 레이아웃/카피/CTA’와 시각적 특징(Do/Don’t)을 요약합니다."
-                right={ds ? <Pill tone="green">v2 데이터</Pill> : <Pill tone="neutral">v2 데이터 없음</Pill>}
+                subtitle="성분별로 '자주 쓰는 레이아웃/카피/CTA'와 시각적 특징(Do/Don't)을 요약합니다."
+                right={dsPage ? <Pill tone="green">v2 데이터</Pill> : <Pill tone="neutral">v2 데이터 없음</Pill>}
               />
 
-              {!ds || ingredientInsights.length === 0 ? (
+              {!dsPage || ingredientInsights.length === 0 ? (
                 <div className="rounded-xl border bg-zinc-50 p-3 text-sm text-zinc-600">
                   표시할 성분 인사이트가 없습니다. (v2 데이터셋 로드/생성 후 확인)
                 </div>
@@ -682,7 +551,7 @@
                     </div>
 
                     <div className="rounded-2xl border bg-white p-4">
-                      <div className="text-sm font-semibold">시각적 특징(Do/Don’t)</div>
+                      <div className="text-sm font-semibold">시각적 특징(Do/Don't)</div>
                       <div className="mt-3 space-y-2 text-sm text-zinc-700">
                         {(currentInsight?.visualTraits || []).slice(0, 6).map((t, i) => (
                           <div key={`vt-${i}`} className="flex gap-2">
@@ -694,7 +563,7 @@
                       </div>
 
                       <div className="mt-4 rounded-xl border bg-white p-3">
-                        <div className="text-sm font-semibold">Do / Don’t</div>
+                        <div className="text-sm font-semibold">Do / Don't</div>
                         <div className="mt-2 space-y-2">
                           {(currentInsight?.doDonts || []).map((x, i) => (
                             <div key={`dd-${i}`} className="flex items-start gap-2 text-sm">
@@ -852,11 +721,10 @@
         )}
 
         <BackToTopButton />
-        <ChatPanel open={chatOpen} onOpenChange={setChatOpen} />
+        <ChatPanel open={chatOpen} onOpenChange={setChatOpen} config={chatConfig} />
       </PageShell>
     );
   }
 
   window.__APP.pages.creativeSearchKeyMessage = CreativeSearchKeyMessagePage;
 })();
-
