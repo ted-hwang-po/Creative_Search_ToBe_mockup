@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="144" height="144" rx="24" fill="url(#g)"/>
+  <rect x="24" y="30" width="52" height="86" rx="16" fill="#ffffff" opacity="0.18"/>
+  <rect x="82" y="30" width="54" height="54" rx="16" fill="#ffffff" opacity="0.18"/>
+  <rect x="82" y="92" width="54" height="24" rx="12" fill="#ffffff" opacity="0.85"/>
+  <text x="24" y="132" font-family="ui-sans-serif, system-ui" font-size="14" font-weight="800" fill="#0b1220" opacity="0.9">ROUNDLAB</text>
+</svg>
+
